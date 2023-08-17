@@ -4,7 +4,7 @@ import (
 	"bufio"
 	"context"
 	"fmt"
-	"grpcChatServer/chatserver"
+	"go-cli-chat-client/chatservice"
 	"log"
 	"os"
 	"strings"
@@ -13,53 +13,41 @@ import (
 )
 
 func main() {
+	serverAddress := os.Getenv("SERVER_ID")
+	serverAddress = strings.Trim(serverAddress, "\r\n")
 
-	fmt.Println("Enter Server IP:Port ::: ")
-	reader := bufio.NewReader(os.Stdin)
-	serverID, err := reader.ReadString('\n')
+	log.Println("Connecting : " + serverAddress)
 
-	if err != nil {
-		log.Printf("Failed to read from console :: %v", err)
-	}
-	serverID = strings.Trim(serverID, "\r\n")
-
-	log.Println("Connecting : " + serverID)
-
-	//connect to grpc server
-	conn, err := grpc.Dial(serverID, grpc.WithInsecure())
+	conn, err := grpc.Dial(serverAddress, grpc.WithInsecure())
 
 	if err != nil {
 		log.Fatalf("Faile to conncet to gRPC server :: %v", err)
 	}
 	defer conn.Close()
 
-	//call ChatService to create a stream
-	client := chatserver.NewServicesClient(conn)
+	client := chatservice.NewChatClient(conn)
 
-	stream, err := client.ChatService(context.Background())
+	stream, err := client.StreamMessages(context.Background())
 	if err != nil {
 		log.Fatalf("Failed to call ChatService :: %v", err)
 	}
 
-	// implement communication with gRPC server
-	ch := clienthandle{stream: stream}
+	ch := clientHandle{stream: stream}
 	ch.clientConfig()
 	go ch.sendMessage()
 	go ch.receiveMessage()
 
-	//blocker
 	bl := make(chan bool)
 	<-bl
 
 }
 
-//clienthandle
-type clienthandle struct {
-	stream     chatserver.Services_ChatServiceClient
+type clientHandle struct {
+	stream     chatservice.Chat_StreamMessagesClient
 	clientName string
 }
 
-func (ch *clienthandle) clientConfig() {
+func (ch *clientHandle) clientConfig() {
 
 	reader := bufio.NewReader(os.Stdin)
 	fmt.Printf("Your Name : ")
@@ -71,10 +59,7 @@ func (ch *clienthandle) clientConfig() {
 
 }
 
-//send message
-func (ch *clienthandle) sendMessage() {
-
-	// create a loop
+func (ch *clientHandle) sendMessage() {
 	for {
 
 		reader := bufio.NewReader(os.Stdin)
@@ -84,9 +69,9 @@ func (ch *clienthandle) sendMessage() {
 		}
 		clientMessage = strings.Trim(clientMessage, "\r\n")
 
-		clientMessageBox := &chatserver.FromClient{
-			Name: ch.clientName,
-			Body: clientMessage,
+		clientMessageBox := &chatservice.Message{
+			User: ch.clientName,
+			Text: clientMessage,
 		}
 
 		err = ch.stream.Send(clientMessageBox)
@@ -99,18 +84,14 @@ func (ch *clienthandle) sendMessage() {
 
 }
 
-//receive message
-func (ch *clienthandle) receiveMessage() {
-
-	//create a loop
+func (ch *clientHandle) receiveMessage() {
 	for {
-		mssg, err := ch.stream.Recv()
+		msg, err := ch.stream.Recv()
 		if err != nil {
 			log.Printf("Error in receiving message from server :: %v", err)
 		}
 
-		//print message to console
-		fmt.Printf("%s : %s \n",mssg.Name,mssg.Body)
-		
+		fmt.Printf("%s : %s \n", msg.User, msg.Text)
+
 	}
 }
